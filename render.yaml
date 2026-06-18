@@ -1,3 +1,4 @@
+
 services:
   - type: web
     name: northgate-premier-league
@@ -11,9 +12,3 @@ services:
         value: production
       - key: PORT
         value: 3001
-      - key: DB_PATH
-        value: /opt/render/project/src/data/game.db
-    disk:
-      name: npl-data
-      mountPath: /opt/render/project/src/data
-      sizeGB: 1
