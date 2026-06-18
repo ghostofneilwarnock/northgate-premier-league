@@ -302,11 +302,19 @@ app.post("/api/league/:id/events/complete", (req, res) => {
 
 // Set matchday tactics
 app.post("/api/league/:id/tactics", (req, res) => {
-  const { userId, matchday, tactics } = req.body;
-  const leagueId = req.params.id;
-  db.upsertMatchdayTactics.run(leagueId, matchday, userId, JSON.stringify(tactics));
-  io.to(leagueId).emit("tactics:updated", { userId, matchday });
-  res.json({ ok: true });
+  try {
+    const { userId, matchday, tactics } = req.body;
+    const leagueId = req.params.id;
+    if (!userId || !tactics) return res.status(400).json({ error: "Missing fields" });
+    db.upsertMatchdayTactics.run(leagueId, matchday || 1, userId, JSON.stringify(tactics));
+    db.updatePlayerTactics.run(JSON.stringify(tactics), leagueId, userId);
+    io.to(leagueId).emit("tactics:updated", { userId, matchday });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("Tactics error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
 });
 
 // Get all fixtures
