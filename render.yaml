@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: northgate-premier-league
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: npm run install:all && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: DB_PATH
+        value: /opt/render/project/src/data/game.db
+    disk:
+      name: npl-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1

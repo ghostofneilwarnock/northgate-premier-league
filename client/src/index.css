@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-dark-bg text-gray-100 font-mono;
+    font-size: 14px;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-npl-green text-dark-bg font-pixel text-xs px-4 py-2 
+           border-2 border-npl-green hover:bg-transparent hover:text-npl-green 
+           transition-all duration-150 cursor-pointer uppercase tracking-wider;
+  }
+  .btn-secondary {
+    @apply bg-transparent text-gray-300 font-mono text-sm px-4 py-2 
+           border border-dark-border hover:border-npl-green hover:text-npl-green 
+           transition-all duration-150 cursor-pointer;
+  }
+  .btn-danger {
+    @apply bg-transparent text-npl-red font-mono text-sm px-4 py-2 
+           border border-npl-red hover:bg-npl-red hover:text-white 
+           transition-all duration-150 cursor-pointer;
+  }
+  .panel {
+    @apply bg-dark-panel border border-dark-border p-4;
+  }
+  .panel-header {
+    @apply font-pixel text-npl-green text-xs mb-3 pb-2 border-b border-dark-border tracking-wider;
+  }
+  .stat-bar {
+    @apply h-2 bg-dark-border rounded-none overflow-hidden;
+  }
+  .stat-bar-fill {
+    @apply h-full transition-all duration-500;
+  }
+  .event-goal { @apply text-npl-gold font-bold; }
+  .event-yellow { @apply text-yellow-400; }
+  .event-red { @apply text-npl-red font-bold; }
+  .event-halftime { @apply text-gray-400 italic border-t border-dark-border pt-1 mt-1; }
+  .event-fulltime { @apply text-npl-green font-bold border-t border-npl-green pt-1 mt-1; }
+  .event-save { @apply text-blue-400; }
+  .event-fatigue { @apply text-orange-400; }
+  .pixel-badge {
+    @apply inline-block px-2 py-1 text-xs font-pixel border;
+  }
+  .fatigue-low { @apply bg-green-900 text-green-400 border-green-700; }
+  .fatigue-mid { @apply bg-yellow-900 text-yellow-400 border-yellow-700; }
+  .fatigue-high { @apply bg-red-900 text-red-400 border-red-700; }
+}
+
+/* Pixel-art scanline overlay */
+.scanlines::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.05) 2px,
+    rgba(0,0,0,0.05) 4px
+  );
+  pointer-events: none;
+}
+
+/* Retro CRT glow */
+.crt-glow {
+  text-shadow: 0 0 8px currentColor;
+}
+
+/* Pixel border */
+.pixel-border {
+  box-shadow: 
+    -2px 0 0 0 #2a2a3a,
+    2px 0 0 0 #2a2a3a,
+    0 -2px 0 0 #2a2a3a,
+    0 2px 0 0 #2a2a3a;
+}
+
+/* Formation grid */
+.pitch-bg {
+  background: 
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+    #1a472a;
+  background-size: 40px 40px;
+}
+
+/* Animated goal flash */
+@keyframes goalFlash {
+  0% { background-color: rgba(255, 215, 0, 0.3); }
+  100% { background-color: transparent; }
+}
+.goal-flash { animation: goalFlash 1s ease-out; }
+
+/* Commentary scroll */
+.commentary-feed {
+  display: flex;
+  flex-direction: column-reverse;
+}
