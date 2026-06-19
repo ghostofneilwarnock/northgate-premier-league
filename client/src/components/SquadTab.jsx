@@ -56,13 +56,15 @@ function PlayerShirt({ player, isSelected, onClick }) {
     <button onClick={onClick}
       className={`flex flex-col items-center gap-0.5 group transition-all duration-150 cursor-pointer
         ${isSelected ? "scale-110" : "hover:scale-105"}`}>
-      <div className={`relative flex items-center justify-center border-2 w-14 h-16 transition-all
-        ${isSelected
-          ? "border-npl-gold bg-yellow-900/40 shadow-lg shadow-yellow-500/30"
-          : "border-dark-border bg-dark-panel group-hover:border-npl-green"}`}
-        style={{ clipPath: "polygon(15% 0%, 85% 0%, 100% 20%, 100% 100%, 0% 100%, 0% 20%)" }}>
-        <div className="absolute top-1 right-1 w-2 h-2 rounded-full" style={{ backgroundColor: ft.color }} />
-        <span className="font-pixel text-xs" style={{ color: rc }}>{player.rating}</span>
+      <div className="relative w-14 h-16">
+        <div className={`absolute inset-0 flex items-center justify-center border-2 transition-all
+          ${isSelected
+            ? "border-npl-gold bg-yellow-900/40 shadow-lg shadow-yellow-500/30"
+            : "border-dark-border bg-dark-panel group-hover:border-npl-green"}`}
+          style={{ clipPath: "polygon(15% 0%, 85% 0%, 100% 20%, 100% 100%, 0% 100%, 0% 20%)" }}>
+          <div className="absolute top-1 right-1 w-2 h-2 rounded-full" style={{ backgroundColor: ft.color }} />
+          <span className="font-pixel text-xs" style={{ color: rc }}>{player.rating}</span>
+        </div>
       </div>
       <span className="font-mono text-center leading-tight text-gray-300 group-hover:text-white w-16"
         style={{ fontSize: "9px" }}>
