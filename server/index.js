@@ -118,7 +118,7 @@ app.post("/api/league/join", (req, res) => {
   if (existing) return res.json({ leagueId: league.id, teamId: existing.team_id });
 
   const players = db.getLeaguePlayers.all(league.id);
-  const takenTeams = players.map(p => p.team_id);
+  const takenTeams = players.filter(p => p.is_human).map(p => p.team_id);
   if (takenTeams.includes(parseInt(teamId))) {
     return res.status(400).json({ error: "Team already taken" });
   }
@@ -276,7 +276,12 @@ app.post("/api/league/:id/events/complete", (req, res) => {
   const currentBuffs = JSON.parse(lp.buffs || "{}");
   const buffStat = eventDef.buffStat;
 
-  if (buffStat !== "fans") {
+  if (buffStat === "fans") {
+    // Thursday — attack buff goes into buffs too
+    if (buffAmount !== 0) {
+      currentBuffs["attack"] = (currentBuffs["attack"] || 0) + buffAmount;
+    }
+  } else {
     currentBuffs[buffStat] = (currentBuffs[buffStat] || 0) + buffAmount;
   }
 
