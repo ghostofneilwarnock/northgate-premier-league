@@ -1,4 +1,5 @@
-import { StandingsTab as StandingsTab, SquadTab, FixturesTab, MarketTab, TacticsTab } from "../components/StandingsTab";
+import { StandingsTab as StandingsTab, FixturesTab, MarketTab, TacticsTab } from "../components/StandingsTab";
+import { SquadTab } from "../components/SquadTab";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useGame } from "../contexts/GameContext";
