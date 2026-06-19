@@ -315,7 +315,6 @@ app.post("/api/league/:id/tactics", (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
-});
 
 // Get all fixtures
 app.get("/api/league/:id/fixtures", (req, res) => {
