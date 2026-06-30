@@ -124,7 +124,7 @@ app.post("/api/league/join", (req, res) => {
   }
 
   // Replace AI manager for chosen team
-  db.db.prepare(`DELETE FROM league_players WHERE league_id = ? AND user_id = ?`)
+  db.prepare(`DELETE FROM league_players WHERE league_id = ? AND user_id = ?`)
     .run(league.id, `ai_${teamId}`);
   db.addLeaguePlayer.run(league.id, userId, userName, parseInt(teamId), 1);
 
@@ -633,14 +633,14 @@ async function runMatchday(leagueId) {
 // node-cron timezone support can be unreliable on some cloud hosts.
 cron.schedule("0 21 * * 5", async () => {
   console.log("[CRON] Friday match night triggered (node-cron backup)");
-  const leagues = db.db.prepare("SELECT id FROM leagues WHERE status = 'active'").all();
+  const leagues = db.prepare("SELECT id FROM leagues WHERE status = 'active'").all();
   for (const l of leagues) { await runMatchday(l.id); }
 }, { timezone: "America/New_York" });
 
 // Monday midnight EST — refresh transfer market
 cron.schedule("0 0 * * 1", () => {
   console.log("[CRON] Monday market refresh");
-  const leagues = db.db.prepare("SELECT id, current_week FROM leagues WHERE status = 'active'").all();
+  const leagues = db.prepare("SELECT id, current_week FROM leagues WHERE status = 'active'").all();
   leagues.forEach(l => {
     const market = generateWeeklyMarket(l.current_week, TEAMS);
     db.upsertMarket.run(l.id, l.current_week, JSON.stringify(market));
@@ -684,7 +684,7 @@ app.post("/api/trigger-match", async (req, res) => {
 
   console.log("[TRIGGER] External match trigger received — running matchday for all active leagues");
 
-  const leagues = db.db.prepare("SELECT id FROM leagues WHERE status = 'active'").all();
+  const leagues = db.prepare("SELECT id FROM leagues WHERE status = 'active'").all();
 
   if (!leagues.length) {
     return res.json({ ok: true, message: "No active leagues to process" });
