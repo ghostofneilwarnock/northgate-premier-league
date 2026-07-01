@@ -19,6 +19,9 @@ const initialState = {
   matchInProgress: false,
   liveEvents: [],
   liveScores: {},
+  commentary: [],
+  isCatchUp: false,
+  catchUpMinute: null,
   pauseState: null,
   notifications: [],
 };
@@ -39,7 +42,7 @@ function reducer(state, action) {
     case "SET_BUFFS": return { ...state, myBuffs: action.buffs };
     case "SET_TACTICS": return { ...state, myTactics: action.tactics };
     case "SET_MARKET": return { ...state, market: action.market };
-    case "MATCH_STARTED": return { ...state, matchInProgress: true, liveEvents: [], liveScores: {} };
+    case "MATCH_STARTED": return { ...state, matchInProgress: true, liveEvents: [], liveScores: {}, commentary: [], isCatchUp: false, catchUpMinute: null };
     case "ADD_LIVE_EVENT": {
       const ev = action.event;
       const newScores = { ...state.liveScores };
@@ -54,11 +57,41 @@ function reducer(state, action) {
         liveScores: newScores,
       };
     }
+    case "MATCH_CATCHUP": {
+      // Late-join: replay the events/commentary we missed into the same
+      // shape ADD_LIVE_EVENT builds up one at a time, so every other part
+      // of the UI (score, feed, progress bar) just works without changes.
+      const liveEvents = [];
+      const liveScores = {};
+      (action.matchEvents || []).forEach(payload => {
+        const ev = payload.event;
+        liveEvents.push({ ...ev, fixtureId: payload.fixtureId, homeTeamId: payload.homeTeamId, awayTeamId: payload.awayTeamId });
+        if (ev.type === "goal") {
+          const key = `${payload.homeTeamId}_${payload.awayTeamId}`;
+          const curr = liveScores[key] || { h: 0, a: 0 };
+          liveScores[key] = ev.side === "home" ? { ...curr, h: curr.h + 1 } : { ...curr, a: curr.a + 1 };
+        }
+      });
+      return {
+        ...state,
+        matchInProgress: true,
+        liveEvents,
+        liveScores,
+        commentary: action.commentary || [],
+        isCatchUp: true,
+        catchUpMinute: action.elapsedMinutes,
+        pauseState: action.isPaused
+          ? { pauseCountHome: action.pauseCountHome, pauseCountAway: action.pauseCountAway }
+          : null,
+      };
+    }
+    case "ADD_COMMENTARY": return { ...state, commentary: [...state.commentary, action.commentary] };
+    case "CLEAR_CATCHUP_BANNER": return { ...state, isCatchUp: false };
     case "MATCH_COMPLETED": return { ...state, matchInProgress: false };
     case "SET_PAUSE_STATE": return { ...state, pauseState: action.pauseState };
     case "ADD_NOTIFICATION": return { ...state, notifications: [...state.notifications, { id: Date.now(), ...action.notification }] };
     case "DISMISS_NOTIFICATION": return { ...state, notifications: state.notifications.filter(n => n.id !== action.id) };
-    case "CLEAR_LIVE": return { ...state, liveEvents: [], liveScores: {} };
+    case "CLEAR_LIVE": return { ...state, liveEvents: [], liveScores: {}, commentary: [] };
     default: return state;
   }
 }

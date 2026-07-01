@@ -68,7 +68,14 @@ export default function LiveMatch({ leagueId }) {
   // Auto scroll feed
   useEffect(() => {
     if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
-  }, [myEvents.length]);
+  }, [myEvents.length, state.commentary.length]);
+
+  // Auto-dismiss the "joined mid-match" banner after a few seconds
+  useEffect(() => {
+    if (!state.isCatchUp) return;
+    const t = setTimeout(() => dispatch({ type: "CLEAR_CATCHUP_BANNER" }), 5000);
+    return () => clearTimeout(t);
+  }, [state.isCatchUp]);
 
   function handlePause() {
     socket?.emit("match:pause", { leagueId, userId: state.userId });
@@ -90,6 +97,15 @@ export default function LiveMatch({ leagueId }) {
   const mySquad = state.mySquad || [];
   const starters = mySquad.slice(0, 11);
   const bench = mySquad.slice(11);
+
+  // Merge banked match events with AI commentary lines into one feed,
+  // ordered by minute. Commentary lines don't belong to a fixture, so
+  // they show up in everyone's feed (only ever generated for the human
+  // fixture on the server side).
+  const feedItems = [
+    ...myEvents.map(ev => ({ ...ev, kind: "event" })),
+    ...state.commentary.map(c => ({ ...c, kind: "commentary" })),
+  ].sort((a, b) => (a.minute || 0) - (b.minute || 0));
 
   return (
     <div className="fixed inset-0 z-50 bg-dark-bg flex flex-col overflow-hidden scanlines">
@@ -128,6 +144,15 @@ export default function LiveMatch({ leagueId }) {
         </div>
       </div>
 
+      {/* Late-join catch-up banner */}
+      {state.isCatchUp && (
+        <div className="bg-yellow-900/30 border-b border-yellow-700 px-4 py-1 text-center">
+          <span className="font-mono text-xs text-yellow-400">
+            Joined at {state.catchUpMinute}' — caught up, live from here
+          </span>
+        </div>
+      )}
+
       {/* Other scores ticker */}
       {otherScores.length > 0 && (
         <div className="bg-dark-panel border-b border-dark-border overflow-hidden h-6 flex items-center">
@@ -142,14 +167,25 @@ export default function LiveMatch({ leagueId }) {
 
       {/* Commentary feed */}
       <div ref={feedRef} className="flex-1 overflow-y-auto p-4 space-y-1">
-        {myEvents.map((ev, i) => (
-          <div key={i} className={`flex gap-2 text-sm animate-slide-up ${ev.type === "goal" ? "goal-flash" : ""}`}>
-            <span className="text-gray-600 font-mono w-8 shrink-0 text-right">{ev.minute}'</span>
-            <span className="shrink-0">{getEventIcon(ev.type)}</span>
-            <span className={getEventClass(ev.type)}>{ev.text}</span>
-          </div>
-        ))}
-        {myEvents.length === 0 && (
+        {feedItems.map((item, i) =>
+          item.kind === "commentary" ? (
+            <div
+              key={`c-${i}`}
+              className={`flex gap-2 text-sm animate-slide-up ${item.isSummary ? "border-t border-dark-border mt-2 pt-2 font-semibold" : ""}`}
+            >
+              <span className="text-gray-600 font-mono w-8 shrink-0 text-right">{item.minute}'</span>
+              <span className="shrink-0">🎙️</span>
+              <span className="italic text-npl-gold/90">{item.text}</span>
+            </div>
+          ) : (
+            <div key={i} className={`flex gap-2 text-sm animate-slide-up ${item.type === "goal" ? "goal-flash" : ""}`}>
+              <span className="text-gray-600 font-mono w-8 shrink-0 text-right">{item.minute}'</span>
+              <span className="shrink-0">{getEventIcon(item.type)}</span>
+              <span className={getEventClass(item.type)}>{item.text}</span>
+            </div>
+          )
+        )}
+        {feedItems.length === 0 && (
           <div className="text-gray-600 font-mono text-sm text-center pt-8 animate-pulse">
             Match loading...
           </div>

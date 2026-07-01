@@ -70,6 +70,8 @@ export default function GameHub() {
       dispatch({ type: "CLEAR_LIVE" });
     });
     socket.on("match:event", (data) => dispatch({ type: "ADD_LIVE_EVENT", ...data }));
+    socket.on("match:catchup", (data) => dispatch({ type: "MATCH_CATCHUP", ...data }));
+    socket.on("match:commentary", (data) => dispatch({ type: "ADD_COMMENTARY", commentary: data }));
     socket.on("match:paused", (ps) => dispatch({ type: "SET_PAUSE_STATE", pauseState: ps }));
     socket.on("match:resumed", () => dispatch({ type: "SET_PAUSE_STATE", pauseState: null }));
     socket.on("match:completed", (data) => {
@@ -81,6 +83,7 @@ export default function GameHub() {
 
     return () => {
       socket.off("match:started"); socket.off("match:event");
+      socket.off("match:catchup"); socket.off("match:commentary");
       socket.off("match:paused"); socket.off("match:resumed");
       socket.off("match:completed"); socket.off("transfer:completed");
       socket.off("market:refreshed");

@@ -15,6 +15,12 @@ const { TEAMS, DAILY_EVENTS, OUTCOME_RESULTS, FORMATIONS, MENTALITIES,
 const { preGenerateEvents, calcFanChange, applyMatchStats,
         resetFatigue, calculateStandings } = require("./matchEngine");
 const { generateWeeklyMarket } = require("./transferMarket");
+const { generateMatchIntro, generateCommentary, generateMatchSummary } = require("./commentary");
+
+// Which event types get an extra AI-generated commentary line, on top of the
+// banked text matchEngine.js already writes. Keep this short — every entry
+// here is a Claude API call per goal/card, only for the human-vs-human fixture.
+const COMMENTARY_EVENT_TYPES = ["goal", "red"];
 
 // ---- Setup ------------------------------------------------
 const app = express();
@@ -340,6 +346,27 @@ io.on("connection", (socket) => {
     socket.data.leagueId = leagueId;
     socket.data.userId = userId;
     io.to(leagueId).emit("player:joined", { userId });
+
+    // Late-joiner catch-up: if a match is already live for this league,
+    // send everything that's happened so far instead of leaving this
+    // socket staring at a blank match screen until the next event fires.
+    const liveMatch = activeMatches.get(leagueId);
+    if (liveMatch) {
+      const pausedMs = liveMatch.totalPausedMs + (liveMatch.paused && liveMatch.pausedAt ? Date.now() - liveMatch.pausedAt : 0);
+      const elapsedRealMs = Date.now() - liveMatch.startedAt - pausedMs;
+      const elapsedMinutes = Math.min(90, Math.max(0, Math.floor((elapsedRealMs / liveMatch.matchDurationMs) * 90)));
+
+      socket.emit("match:catchup", {
+        matchday: liveMatch.matchday,
+        fixtures: liveMatch.fixturesSummary,
+        matchEvents: liveMatch.events,
+        commentary: liveMatch.commentary,
+        elapsedMinutes,
+        isPaused: liveMatch.paused,
+        pauseCountHome: liveMatch.pauseCountHome,
+        pauseCountAway: liveMatch.pauseCountAway,
+      });
+    }
   });
 
   // Request pause
@@ -361,12 +388,17 @@ io.on("connection", (socket) => {
 
     matchState.paused = true;
     matchState.pausedBy = userId;
+    matchState.pausedAt = Date.now();
     matchState[pauseKey]++;
 
     // Start 60-second resume countdown
     matchState.pauseTimer = setTimeout(() => {
       matchState.paused = false;
       matchState.pausedBy = null;
+      if (matchState.pausedAt) {
+        matchState.totalPausedMs += Date.now() - matchState.pausedAt;
+        matchState.pausedAt = null;
+      }
       io.to(leagueId).emit("match:resumed", { reason: "Timeout" });
     }, 60000);
 
@@ -385,6 +417,10 @@ io.on("connection", (socket) => {
     if (matchState.pauseTimer) clearTimeout(matchState.pauseTimer);
     matchState.paused = false;
     matchState.pausedBy = null;
+    if (matchState.pausedAt) {
+      matchState.totalPausedMs += Date.now() - matchState.pausedAt;
+      matchState.pausedAt = null;
+    }
     io.to(leagueId).emit("match:resumed", { reason: "Manager ready" });
   });
 
@@ -506,11 +542,26 @@ async function runMatchday(leagueId) {
   const MATCH_DURATION_MS = 30 * 60 * 1000;
   const MS_PER_GAME_MIN = MATCH_DURATION_MS / 90;
 
+  const fixturesSummary = Object.values(matchEventTimeline).map(m => ({
+    id: m.fixture.id,
+    homeTeamId: m.fixture.home_team_id,
+    awayTeamId: m.fixture.away_team_id,
+    homeName: m.homeState.team.name,
+    awayName: m.awayState.team.name,
+  }));
+
   const matchState = {
-    leagueId, paused: false, pausedBy: null,
+    leagueId, paused: false, pausedBy: null, pausedAt: null,
     pauseCountHome: 0, pauseCountAway: 0,
     subsUsedHome: 0, subsUsedAway: 0,
     homeTeamId: null, awayTeamId: null,
+    matchday,
+    startedAt: Date.now(),
+    matchDurationMs: MATCH_DURATION_MS,
+    totalPausedMs: 0,
+    fixturesSummary,
+    events: [],       // raw match:event payloads, for catch-up replay
+    commentary: [],   // AI commentary lines, for catch-up replay
   };
 
   const humanFixture = Object.values(matchEventTimeline).find(m =>
@@ -530,14 +581,25 @@ async function runMatchday(leagueId) {
   activeMatches.set(leagueId, matchState);
   io.to(leagueId).emit("match:started", {
     matchday,
-    fixtures: Object.values(matchEventTimeline).map(m => ({
-      id: m.fixture.id,
-      homeTeamId: m.fixture.home_team_id,
-      awayTeamId: m.fixture.away_team_id,
-      homeName: m.homeState.team.name,
-      awayName: m.awayState.team.name,
-    })),
+    fixtures: fixturesSummary,
   });
+
+  // AI-generated pre-match intro for the human fixture only (non-blocking —
+  // the match clock never waits on this; it just arrives a beat after kickoff).
+  if (humanFixture) {
+    generateMatchIntro({
+      homeTeam: humanFixture.homeState.team.name,
+      awayTeam: humanFixture.awayState.team.name,
+      stadium: humanFixture.homeState.team.stadium,
+      matchdayNumber: matchday,
+    }).then(intro => {
+      if (intro) {
+        const commentaryPayload = { minute: 0, text: intro };
+        matchState.commentary.push(commentaryPayload);
+        io.to(leagueId).emit("match:commentary", commentaryPayload);
+      }
+    });
+  }
 
   const allTimedEvents = [];
   Object.values(matchEventTimeline).forEach(({ fixture, result }) => {
@@ -570,12 +632,33 @@ async function runMatchday(leagueId) {
       elapsed = timedEv.realMs;
     }
 
-    io.to(leagueId).emit("match:event", {
+    const eventPayload = {
       fixtureId: timedEv.fixtureId,
       homeTeamId: timedEv.homeTeamId,
       awayTeamId: timedEv.awayTeamId,
       event: timedEv.event,
-    });
+    };
+
+    matchState.events.push(eventPayload);
+    io.to(leagueId).emit("match:event", eventPayload);
+
+    // AI commentary — only for the human fixture, and only for the event
+    // types listed in COMMENTARY_EVENT_TYPES, to keep API usage sensible.
+    // Non-blocking: fires after the event, never delays the match clock.
+    const isHumanFixture = humanFixture && timedEv.fixtureId === humanFixture.fixture.id;
+    if (isHumanFixture && COMMENTARY_EVENT_TYPES.includes(timedEv.event.type)) {
+      generateCommentary(timedEv.event, {
+        homeTeam: humanFixture.homeState.team.name,
+        awayTeam: humanFixture.awayState.team.name,
+        matchdayNumber: matchday,
+      }).then(line => {
+        if (line) {
+          const commentaryPayload = { minute: timedEv.event.minute, text: line };
+          matchState.commentary.push(commentaryPayload);
+          io.to(leagueId).emit("match:commentary", commentaryPayload);
+        }
+      });
+    }
   }
 
   // ---- Post-match processing ---------------------------------
@@ -611,6 +694,21 @@ async function runMatchday(leagueId) {
   db.upsertMarket.run(leagueId, league.current_week + 1, JSON.stringify(generateWeeklyMarket(league.current_week + 1, TEAMS)));
 
   db.setMatchInProgress.run(0, leagueId);
+
+  // AI-generated full-time summary for the human fixture (non-blocking —
+  // arrives a moment after match:completed, doesn't hold up the response).
+  if (humanFixture) {
+    generateMatchSummary({
+      homeTeam: humanFixture.homeState.team.name,
+      awayTeam: humanFixture.awayState.team.name,
+      homeScore: humanFixture.result.homeGoals,
+      awayScore: humanFixture.result.awayGoals,
+      matchdayNumber: matchday,
+    }, humanFixture.result.events).then(summary => {
+      if (summary) io.to(leagueId).emit("match:commentary", { minute: 90, text: summary, isSummary: true });
+    });
+  }
+
   activeMatches.delete(leagueId);
 
   const finalState = getLeagueState(leagueId);
