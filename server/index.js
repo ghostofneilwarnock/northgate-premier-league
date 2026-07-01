@@ -124,7 +124,7 @@ app.post("/api/league/join", (req, res) => {
   }
 
   // Replace AI manager for chosen team
-  db.db.prepare(`DELETE FROM league_players WHERE league_id = ? AND user_id = ?`)
+  db.prepare(`DELETE FROM league_players WHERE league_id = ? AND user_id = ?`)
     .run(league.id, `ai_${teamId}`);
   db.addLeaguePlayer.run(league.id, userId, userName, parseInt(teamId), 1);
 
@@ -503,12 +503,9 @@ async function runMatchday(leagueId) {
   });
 
   // ---- Stream events over 30 real minutes --------------------
-  // 90 game mins → 1800 real secs → 1 game min = 20 real secs
-  // But we compress: emit events as they happen over 30 mins
   const MATCH_DURATION_MS = 30 * 60 * 1000;
   const MS_PER_GAME_MIN = MATCH_DURATION_MS / 90;
 
-  // Track active match state for pausing
   const matchState = {
     leagueId, paused: false, pausedBy: null,
     pauseCountHome: 0, pauseCountAway: 0,
@@ -516,7 +513,6 @@ async function runMatchday(leagueId) {
     homeTeamId: null, awayTeamId: null,
   };
 
-  // Find the fixture involving human players
   const humanFixture = Object.values(matchEventTimeline).find(m =>
     players.find(p => p.team_id === m.fixture.home_team_id && p.is_human) ||
     players.find(p => p.team_id === m.fixture.away_team_id && p.is_human)
@@ -543,7 +539,6 @@ async function runMatchday(leagueId) {
     })),
   });
 
-  // Collect all events across all fixtures with real timestamps
   const allTimedEvents = [];
   Object.values(matchEventTimeline).forEach(({ fixture, result }) => {
     result.events.forEach(ev => {
@@ -558,20 +553,16 @@ async function runMatchday(leagueId) {
   });
   allTimedEvents.sort((a, b) => a.realMs - b.realMs);
 
-  // Emit events with actual timing
   let elapsed = 0;
-  let lastEmit = Date.now();
 
   for (const timedEv of allTimedEvents) {
     const waitMs = timedEv.realMs - elapsed;
     if (waitMs > 0) {
-      // Check for pauses during wait
       const checkInterval = 250;
       let waited = 0;
       while (waited < waitMs) {
         await new Promise(r => setTimeout(r, checkInterval));
         waited += checkInterval;
-        // If paused, freeze
         while (matchState.paused) {
           await new Promise(r => setTimeout(r, 200));
         }
@@ -590,15 +581,12 @@ async function runMatchday(leagueId) {
   // ---- Post-match processing ---------------------------------
   await new Promise(r => setTimeout(r, 2000));
 
-  const updatedPlayers = [];
   Object.values(matchEventTimeline).forEach(({ fixture, result, homeLP, awayLP, homeState, awayState }) => {
-    // Update player stats
     const updatedHome = applyMatchStats(homeState.players, result.events, "home");
     const updatedAway = applyMatchStats(awayState.players, result.events, "away");
     db.upsertSquad.run(leagueId, fixture.home_team_id, JSON.stringify(updatedHome));
     db.upsertSquad.run(leagueId, fixture.away_team_id, JSON.stringify(updatedAway));
 
-    // Fan economy
     if (homeLP?.is_human) {
       const fanChange = calcFanChange(homeLP.fans, result.homeGoals, result.awayGoals, true);
       const newFans = Math.max(1000, homeLP.fans + fanChange);
@@ -613,16 +601,13 @@ async function runMatchday(leagueId) {
     }
   });
 
-  // Clear weekly buffs
   players.filter(p => p.is_human).forEach(p => {
     db.updatePlayerBuffs.run("{}", leagueId, p.user_id);
   });
 
-  // Advance matchday
   const nextMatchday = league.current_matchday + 1;
   db.advanceMatchday.run(nextMatchday, leagueId);
 
-  // Generate next week's market
   db.upsertMarket.run(leagueId, league.current_week + 1, JSON.stringify(generateWeeklyMarket(league.current_week + 1, TEAMS)));
 
   db.setMatchInProgress.run(0, leagueId);
@@ -644,24 +629,78 @@ async function runMatchday(leagueId) {
 }
 
 // ---- Cron jobs -----------------------------------------------
-// Friday 9pm EST → 21:00 America/New_York = "0 21 * * 5" server time
-// Adjust if server runs in UTC: "0 2 * * 6" (Sat 02:00 UTC = Fri 21:00 EST)
+// Kept as a backup — but primary trigger is the external HTTP endpoint below.
+// node-cron timezone support can be unreliable on some cloud hosts.
 cron.schedule("0 21 * * 5", async () => {
-  console.log("[CRON] Friday match night triggered");
-  const leagues = db.db.prepare("SELECT id FROM leagues WHERE status = 'active'").all();
+  console.log("[CRON] Friday match night triggered (node-cron backup)");
+  const leagues = db.prepare("SELECT id FROM leagues WHERE status = 'active'").all();
   for (const l of leagues) { await runMatchday(l.id); }
 }, { timezone: "America/New_York" });
 
 // Monday midnight EST — refresh transfer market
 cron.schedule("0 0 * * 1", () => {
   console.log("[CRON] Monday market refresh");
-  const leagues = db.db.prepare("SELECT id, current_week FROM leagues WHERE status = 'active'").all();
+  const leagues = db.prepare("SELECT id, current_week FROM leagues WHERE status = 'active'").all();
   leagues.forEach(l => {
     const market = generateWeeklyMarket(l.current_week, TEAMS);
     db.upsertMarket.run(l.id, l.current_week, JSON.stringify(market));
     io.to(l.id).emit("market:refreshed", { week: l.current_week });
   });
 }, { timezone: "America/New_York" });
+
+// ---- External trigger endpoint (primary match trigger) -------
+// Called by cron-job.org at 9pm ET every Friday.
+// Protected by MATCH_SECRET env variable — set this in your Render dashboard.
+app.post("/api/trigger-match", async (req, res) => {
+  const secret = process.env.MATCH_SECRET;
+
+  // If MATCH_SECRET is set, enforce it. If not set, warn but allow (so you can test).
+  if (secret) {
+    const provided = req.headers["x-match-secret"] || req.body?.secret;
+    if (provided !== secret) {
+      console.warn("[TRIGGER] Unauthorised match trigger attempt");
+      return res.status(401).json({ error: "Unauthorised" });
+    }
+  } else {
+    console.warn("[TRIGGER] MATCH_SECRET not set — endpoint is unprotected. Set it in Render env vars.");
+  }
+
+  // Optional: verify it's actually Friday 9pm ET (guards against accidental triggers)
+  const day = getESTDayOfWeek();
+  const hour = getESTHour();
+  const isFridayNight = day === 5 && hour >= 21 && hour < 23;
+
+  if (!isFridayNight) {
+    // Allow override via body for manual/test triggers
+    if (!req.body?.force) {
+      return res.status(400).json({
+        error: "Not Friday night ET. Send { force: true } in request body to override.",
+        currentDay: day,
+        currentHour: hour,
+      });
+    }
+    console.log("[TRIGGER] Forced trigger outside Friday night window");
+  }
+
+  console.log("[TRIGGER] External match trigger received — running matchday for all active leagues");
+
+  const leagues = db.prepare("SELECT id FROM leagues WHERE status = 'active'").all();
+
+  if (!leagues.length) {
+    return res.json({ ok: true, message: "No active leagues to process" });
+  }
+
+  // Respond immediately so cron-job.org doesn't time out, then run matches
+  res.json({ ok: true, message: `Triggering matchday for ${leagues.length} league(s)` });
+
+  for (const l of leagues) {
+    try {
+      await runMatchday(l.id);
+    } catch (err) {
+      console.error(`[TRIGGER] Error running matchday for league ${l.id}:`, err);
+    }
+  }
+});
 
 // ---- Dev endpoint to manually trigger matchday ---------------
 if (process.env.NODE_ENV !== "production") {
@@ -678,7 +717,6 @@ app.get("*", (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 
-// Boot sequence: init DB then start listening
 db.init().then(() => {
   server.listen(PORT, () => console.log(`⚽ Northgate Premier League server running on :${PORT}`));
 }).catch(err => {
