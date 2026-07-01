@@ -11,6 +11,7 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\""
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.109.0",
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "node-cron": "^3.0.3",
